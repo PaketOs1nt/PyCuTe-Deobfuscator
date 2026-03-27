@@ -281,7 +281,11 @@ class DeCuteConst(ast.NodeTransformer):
                 and isinstance(node.func, ast.Name)
                 and node.func.id == self.inlinec["deint2"][0]
             ):
-                return ast.Constant(self.inlinec["deint2"][1](node.args))
+                return ast.Constant(
+                    self.inlinec["deint2"][1](
+                        ast.literal_eval(ast.unparse(node.args[0]))
+                    )
+                )
             elif (
                 len(node.args) == 1
                 and isinstance(node.args[0], ast.Call)
