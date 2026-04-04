@@ -2,10 +2,6 @@ import ast
 import sys
 from typing import Any
 
-NOAST = ast.Module([], [])
-
-counters = {}
-
 
 def is_name(dat: str):
     for c in dat:
@@ -15,15 +11,9 @@ def is_name(dat: str):
     return True
 
 
-def gen_name(pref: str):
-    global counters
-    c = counters.setdefault(pref, 0)
-    counters["pref"] += 1
-    return f"{pref}_{c}_DEOBF"
-
-
 badfuncs = (
     "__runtime_check__",
+    "__decoder__",
     "__identity_func__",
     "__runtime_protect__",
     "__validate_signature__",
@@ -116,7 +106,7 @@ class DeCuteCFF(ast.NodeTransformer):
     def visit_Assign(self, node: ast.Assign) -> Any:
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             if node.targets[0].id == "obf_data_list":
-                return NOAST
+                return
             elif isinstance(node.value, ast.Constant) and node.value.value == 0:
                 self.susp.add(node.targets[0].id)
 
@@ -136,6 +126,24 @@ class DeCuteCFF(ast.NodeTransformer):
         ):
             return ast.Pass()
         return self.generic_visit(node)
+
+
+class ReFSTRING(ast.NodeTransformer):
+    def visit_Call(self, node: ast.Call) -> Any:
+        node = self.generic_visit(node)  # type: ignore
+        match node:
+            case ast.Call(
+                ast.Attribute(ast.Constant(str(brackets)), "format"), args
+            ) if brackets.count("{}") == (len(brackets) // 2) == len(args):
+                result = ast.JoinedStr([])
+                for arg in args:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        result.values.append(arg)
+                    else:
+                        result.values.append(ast.FormattedValue(arg, -1, None))
+                return result
+
+        return node
 
 
 class DeCuteNaming(ast.NodeTransformer):
@@ -169,7 +177,7 @@ class DeCuteNaming(ast.NodeTransformer):
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             if isinstance(node.value, ast.Name):
                 self.remap[node.targets[0].id] = node.value.id
-                return NOAST
+                return
             elif (
                 isinstance(node.value, ast.Constant) and node.value.value == "utf8"
             ) or (
@@ -178,24 +186,38 @@ class DeCuteNaming(ast.NodeTransformer):
                 and node.value.func.id == "globals"
             ):
                 self.inlines[node.targets[0].id] = node.value
-                return NOAST
-
-            # elif not is_name(node.targets[0].id):
-            #     name = gen_name()
-            #     self.remap[node.targets[0].id] = name
-            #     node.targets[0].id = name
+                return
 
         return self.generic_visit(node)
 
 
-class NoStupidLambda(ast.NodeTransformer):
+class POSTFIX(ast.NodeTransformer):
+    class Rebuilder(ast.NodeTransformer):
+        def __init__(self, remap: dict[str, ast.expr]) -> None:
+            self.map = remap
+
+        def visit_Name(self, node: ast.Name) -> Any:
+            if node.id in self.map:
+                return self.map[node.id]
+            return node
+
     def visit_Call(self, node: ast.Call) -> Any:
-        if isinstance(node.func, ast.Lambda) and isinstance(
-            node.func.body, ast.Constant
-        ):
-            return node.func.body
+        node = self.generic_visit(node)  # type: ignore
+        if isinstance(node.func, ast.Lambda):
+            lambd = node.func
+            if len(lambd.args.args) != len(node.args):
+                return node
 
-        return self.generic_visit(node)
+            remap = {a.arg: b for a, b in zip(lambd.args.args, node.args)}
+            return POSTFIX.Rebuilder(remap).visit(node.func.body)
+
+        return node
+
+    def visit_Expr(self, node: ast.Expr) -> Any:
+        node = self.generic_visit(node)  # type: ignore
+        if isinstance(node.value, ast.Constant):
+            return
+        return node
 
 
 class DeCuteConst(ast.NodeTransformer):
@@ -221,7 +243,7 @@ class DeCuteConst(ast.NodeTransformer):
             and isinstance(node.body[3], ast.Return)
         ):
             self.inlinec["deint"] = (node.name, deInt)  # type: ignore
-            return NOAST
+            return
         elif (
             len(node.body) == 1
             and isinstance(node.body[0], ast.Return)
@@ -234,7 +256,7 @@ class DeCuteConst(ast.NodeTransformer):
             and node.body[0].value.args[0].right.value == 309485009821345068724781055
         ):
             self.inlinec["deint2"] = (node.name, deInt2)  # type: ignore
-            return NOAST
+            return
         elif (
             len(node.body) == 2
             and isinstance(node.body[0], ast.Assign)
@@ -250,7 +272,7 @@ class DeCuteConst(ast.NodeTransformer):
             and node.body[1].test.comparators[0].value == 127
         ):
             self.inlinec["destr"] = (node.name, deStr)  # type: ignore
-            return NOAST
+            return
         elif (
             len(node.body) == 3
             and isinstance(node.body[0], ast.Assign)
@@ -262,7 +284,7 @@ class DeCuteConst(ast.NodeTransformer):
             and isinstance(node.body[2].value, ast.Name)
         ):
             self.inlinec["fixjoin"] = (node.name, fixJoin)  # type: ignore
-            return NOAST
+            return
         return self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> Any:
@@ -318,21 +340,21 @@ class DeCuteCFFPost(ast.NodeTransformer):
     def visit_Assign(self, node: ast.Assign) -> Any:
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             if node.targets[0].id in self.detected:
-                return NOAST
+                return
 
         return self.generic_visit(node)
 
     def visit_AugAssign(self, node: ast.AugAssign) -> Any:
         if isinstance(node.target, ast.Name):
             if node.target.id in self.detected:
-                return NOAST
+                return
 
         return self.generic_visit(node)
 
 
 class Fixer(ast.NodeTransformer):
     def visit_Try(self, node: ast.Try) -> Any:
-        if len(node.body) == 1 and isinstance(node.body[0], ast.Module):
+        if not node.body:
             node.body = [ast.Pass()]
         return self.generic_visit(node)
 
@@ -347,7 +369,7 @@ def deobf(src: str) -> str:
     if not isinstance(first, ast.ClassDef):
         return "# error: first stmt is not class"
 
-    ast_s.body[0] = NOAST  # type: ignore
+    ast_s.body.pop(0)
     exc: ast.ClassDef = first
 
     # удаление лишних функций далбаепских
@@ -375,8 +397,10 @@ def deobf(src: str) -> str:
     decname = DeCuteNaming()
     out = astfix(decname.visit(out))
 
+    out = astfix(ReFSTRING().visit(out))
+
     decconst = DeCuteConst()
-    out = astfix(NoStupidLambda().visit(decconst.visit(out)))
+    out = astfix(POSTFIX().visit(decconst.visit(out)))
 
     # чистка лишних мусаров
     out.body = list(
