@@ -1,6 +1,20 @@
 import sys
 import time
 import os
+try:
+
+    def __decoder__(__ok__):
+        return '__ANTI_DECOMPILER__'
+    try:
+        1 / 0
+    except:
+        pass
+except:
+    pass
+else:
+    pass
+finally:
+    pass
 import os
 import platform
 import subprocess
@@ -14,7 +28,7 @@ from tkinter import messagebox
 
 def 馆榶俲():
     鋷鈘哵 = 驶氊薉.get()
-    messagebox.showinfo('Thông báo', '{}{}'.format('Thằng chó của tao đã nhập: ', 鋷鈘哵))
+    messagebox.showinfo('Thông báo', f'Thằng chó của tao đã nhập: {鋷鈘哵}')
 root = tkinter.Tk()
 root.title('OBF - PyCuTe v3.0')
 root.geometry('350x200')
